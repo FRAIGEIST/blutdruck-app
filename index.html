@@ -190,21 +190,41 @@
     .leg-line { width: 20px; height: 3px; border-radius: 2px; }
 
     /* ── Protokoll ── */
-    .proto-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .proto-actions-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
     .btn-sm {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 8px 13px; border-radius: 8px; font-size: 0.78rem;
+      padding: 9px 14px; border-radius: 8px; font-size: 0.8rem;
       font-weight: 700; cursor: pointer; border: 1.5px solid; transition: background 0.15s;
     }
     .btn-sm:active { opacity: 0.8; }
     .btn-export { background: #eff6ff; color: var(--blue2); border-color: #93c5fd; }
-    .btn-import { background: #f0fdf4; color: #16a34a;   border-color: #86efac; }
     .btn-danger { background: #fef2f2; color: #dc2626;   border-color: #fca5a5; margin-left: auto; }
 
+    /* Upload-Zone */
+    .upload-zone {
+      border: 2px dashed #86efac;
+      border-radius: 12px;
+      background: #f0fdf4;
+      padding: 20px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      margin-bottom: 14px;
+      position: relative;
+    }
+    .upload-zone:active,
+    .upload-zone.dragover { background: #dcfce7; border-color: #16a34a; }
+    .upload-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-icon { font-size: 2rem; margin-bottom: 6px; }
+    .upload-title { font-size: 0.9rem; font-weight: 700; color: #15803d; margin-bottom: 3px; }
+    .upload-hint  { font-size: 0.72rem; color: #4ade80; color: #86a896; }
+
     .import-fb {
-      display: none; margin-bottom: 10px; padding: 9px 12px;
-      border-radius: 8px; font-size: 0.8rem; font-weight: 600;
-      animation: slideIn 0.2s ease;
+      display: none; margin-bottom: 12px; padding: 10px 14px;
+      border-radius: 10px; font-size: 0.82rem; font-weight: 600;
+      animation: slideIn 0.2s ease; align-items: center; gap: 8px;
     }
     .import-fb.ok  { display: flex; background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
     .import-fb.err { display: flex; background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
@@ -453,11 +473,21 @@
       <div class="card">
         <div class="card-title">🗒️ Messprotokoll</div>
 
-        <div class="proto-bar">
-          <button class="btn-sm btn-export" onclick="exportCSV()">⬇️ CSV</button>
-          <button class="btn-sm btn-import" onclick="document.getElementById('csv-input').click()">⬆️ Import</button>
-          <input type="file" id="csv-input" accept=".csv" style="display:none;" onchange="importCSV(event)" />
+        <!-- Aktionsleiste -->
+        <div class="proto-actions-bar">
+          <button class="btn-sm btn-export" onclick="exportCSV()">⬇️ CSV exportieren</button>
           <button class="btn-sm btn-danger"  onclick="clearHistory()">🗑 Löschen</button>
+        </div>
+
+        <!-- Upload-Zone -->
+        <div class="upload-zone" id="upload-zone"
+             ondragover="handleDragOver(event)"
+             ondragleave="handleDragLeave(event)"
+             ondrop="handleDrop(event)">
+          <input type="file" id="csv-input" accept=".csv,text/csv" onchange="importCSV(event)" />
+          <div class="upload-icon">📂</div>
+          <div class="upload-title">CSV-Datei importieren</div>
+          <div class="upload-hint">Tippen zum Auswählen · auf dem Desktop auch per Drag &amp; Drop</div>
         </div>
         <div class="import-fb" id="import-fb"></div>
 
@@ -812,6 +842,30 @@ function addMeasurement() {
   }
 }
 
+// ── Drag & Drop ───────────────────────────────────────────────────────
+function handleDragOver(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('upload-zone').classList.add('dragover');
+}
+function handleDragLeave(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('upload-zone').classList.remove('dragover');
+}
+function handleDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('upload-zone').classList.remove('dragover');
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+    const fb = document.getElementById('import-fb');
+    fb.textContent = '❌ Bitte nur CSV-Dateien hochladen.';
+    fb.className = 'import-fb err';
+    setTimeout(() => { fb.className = 'import-fb'; }, 4000);
+    return;
+  }
+  processCSVFile(file);
+}
+
 // ── CSV ───────────────────────────────────────────────────────────────
 function exportCSV() {
   if (history.length===0){alert('Keine Messungen zum Exportieren.');return;}
@@ -829,38 +883,66 @@ function exportCSV() {
   document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function importCSV(event) {
-  const file=event.target.files[0]; if(!file)return;
-  const fb=document.getElementById('import-fb');
-  const reader=new FileReader();
-  reader.onload=e=>{
-    fb.className='import-fb';
+  const file = event.target.files[0];
+  if (!file) return;
+  processCSVFile(file);
+  event.target.value = '';
+}
+
+function processCSVFile(file) {
+  const fb = document.getElementById('import-fb');
+  fb.className = 'import-fb';
+
+  // Lade-Zustand anzeigen
+  fb.textContent = '⏳ Datei wird eingelesen…';
+  fb.className = 'import-fb ok';
+
+  const reader = new FileReader();
+  reader.onload = e => {
     try {
-      const text=e.target.result.replace(/^\uFEFF/,'');
-      const lines=text.split(/\r?\n/).filter(l=>l.trim());
-      if(lines.length<2) throw new Error('Datei enthält keine Daten.');
-      const head=lines[0].toLowerCase();
-      if(!head.includes('datum')||!head.includes('systolisch')) throw new Error('Unbekanntes CSV-Format.');
-      let added=0,skipped=0;
-      for(let i=1;i<lines.length;i++){
-        const c=lines[i].split(','); if(c.length<4)continue;
-        const date=c[0].trim(),time=c[1].trim();
-        const sys=parseInt(c[2]),dia=parseInt(c[3]);
-        const pulse=c[4]&&c[4].trim()!==''?parseInt(c[4]):null;
-        const retro=c[5]&&c[5].trim().toLowerCase()==='ja';
-        if(isNaN(sys)||isNaN(dia)){skipped++;continue;}
-        if(history.some(m=>m.date===date&&m.time===time&&m.sys===sys&&m.dia===dia)){skipped++;continue;}
-        history.push({sys,dia,pulse,date,time,retroactive:retro}); added++;
+      const text  = e.target.result.replace(/^\uFEFF/, '');
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) throw new Error('Datei enthält keine Messdaten.');
+      const head = lines[0].toLowerCase();
+      if (!head.includes('datum') || !head.includes('systolisch'))
+        throw new Error('Unbekanntes Format – bitte nur Dateien aus dieser App importieren.');
+
+      let added = 0, skipped = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const c = lines[i].split(',');
+        if (c.length < 4) continue;
+        const date  = c[0].trim(), time = c[1].trim();
+        const sys   = parseInt(c[2]), dia = parseInt(c[3]);
+        const pulse = c[4] && c[4].trim() !== '' ? parseInt(c[4]) : null;
+        const retro = c[5] && c[5].trim().toLowerCase() === 'ja';
+        if (isNaN(sys) || isNaN(dia)) { skipped++; continue; }
+        if (history.some(m => m.date===date && m.time===time && m.sys===sys && m.dia===dia))
+          { skipped++; continue; }
+        history.push({ sys, dia, pulse, date, time, retroactive: retro });
+        added++;
       }
-      if(history.length>200)history.splice(0,history.length-200);
-      saveHistory(); renderHistory();
-      if(history.length>0){const last=[...history].sort((a,b)=>toKey(b).localeCompare(toKey(a)))[0];updateGauges(last.sys,last.dia,last.pulse);}
-      fb.textContent=`✅ ${added} Eintrag${added!==1?'e':''} importiert${skipped>0?`, ${skipped} übersprungen`:''}`;
-      fb.className='import-fb ok';
-    } catch(err){fb.textContent=`❌ ${err.message}`;fb.className='import-fb err';}
-    event.target.value='';
-    setTimeout(()=>{fb.className='import-fb';},5000);
+      if (history.length > 200) history.splice(0, history.length - 200);
+      saveHistory();
+      renderHistory();
+      if (history.length > 0) {
+        const last = [...history].sort((a,b) => toKey(b).localeCompare(toKey(a)))[0];
+        updateGauges(last.sys, last.dia, last.pulse);
+      }
+      fb.textContent = `✅ ${added} Eintrag${added!==1?'e':''} importiert` +
+        (skipped > 0 ? ` · ${skipped} Duplikat${skipped!==1?'e':''} übersprungen` : '');
+      fb.className = 'import-fb ok';
+    } catch(err) {
+      fb.textContent = `❌ ${err.message}`;
+      fb.className = 'import-fb err';
+    }
+    setTimeout(() => { fb.className = 'import-fb'; }, 6000);
   };
-  reader.readAsText(file,'UTF-8');
+  reader.onerror = () => {
+    fb.textContent = '❌ Datei konnte nicht gelesen werden.';
+    fb.className = 'import-fb err';
+    setTimeout(() => { fb.className = 'import-fb'; }, 5000);
+  };
+  reader.readAsText(file, 'UTF-8');
 }
 
 function clearHistory() {
